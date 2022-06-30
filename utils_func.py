@@ -9,6 +9,7 @@ from dataclasses import asdict
 from scipy.stats import entropy, kurtosis, skew, median_absolute_deviation, moment
 import pandas as pd
 from scipy.signal import welch
+from numpy.random import uniform
 
 
 def nan_helper(y):
@@ -106,6 +107,28 @@ def extract_all_new_features(signal):
         'MAD': mad
     }
     return dict_features
+
+
+def jensen_shannon_distance(p, q):
+    """
+    method to compute the Jenson-Shannon Distance
+    between two probability distributions
+    """
+
+    # convert the vectors into numpy arrays in case that they aren't
+    p = np.array(p)
+    q = np.array(q)
+
+    # calculate m
+    m = (p + q) / 2
+
+    # compute Jensen Shannon Divergence
+    divergence = (entropy(p, m) + entropy(q, m)) / 2
+
+    # compute the Jensen Shannon Distance
+    distance = np.sqrt(divergence)
+
+    return distance
 
 
 def compute_features_from_psd(psd_signal, to_add=''):
