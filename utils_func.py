@@ -10,6 +10,7 @@ from scipy.stats import entropy, kurtosis, skew, median_absolute_deviation, mome
 import pandas as pd
 from scipy.signal import welch
 from numpy.random import uniform
+import xml.dom.minidom as xdm
 
 
 def nan_helper(y):
@@ -169,3 +170,11 @@ def compute_psd_features(signal):
 
     all_features = {**final_features_all_psd, **final_features_bp}
     return all_features
+
+
+def load_sleep_stages(file_path):
+    doc = xdm.parse(open(file_path, 'r'))
+    sleep_stages = doc.getElementsByTagName("SleepStages")[0].childNodes
+    sleep_stages = [int(sleep_stages[i].firstChild.data) for i in np.arange(len(sleep_stages))]
+
+    return sleep_stages
