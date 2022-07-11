@@ -5,11 +5,12 @@ import xgboost as xg
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from sklearn.metrics import roc_auc_score, roc_curve, precision_score, recall_score, precision_recall_curve
+from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import PolynomialFeatures
+from constants import metadata_columns, outcome_column, treatment_column
+
 
 from GPS import gps_score
-from IDE import find_best_features
 from dose_average_response import avg_dose_response
 
 def check_best(best_model, current_model, best_auc, current_auc):
@@ -45,10 +46,10 @@ def model_selection(X, Y):
     best_auc = 0.5
 
 
-    est_gp = find_best_features(X_train, y_train, column_names=X.columns)
-    y_pred = est_gp.predict(X_test)
-    model_auc = evaluate_model(y_test, y_pred, 'GeneticESTIMATOR')
-    best_model, best_auc = check_best(best_model, est_gp, best_auc, model_auc)
+    # est_gp = find_best_features(X_train, y_train, column_names=X.columns)
+    # y_pred = est_gp.predict(X_test)
+    # model_auc = evaluate_model(y_test, y_pred, 'GeneticESTIMATOR')
+    # best_model, best_auc = check_best(best_model, est_gp, best_auc, model_auc)
 
 
     # RandomForestRegressor
