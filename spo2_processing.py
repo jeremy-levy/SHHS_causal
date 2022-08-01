@@ -5,7 +5,7 @@ from pobm.prep import resamp_spo2, set_range, median_spo2
 from dataclasses import asdict
 import pandas as pd
 
-from utils_func import linear_interpolation, extract_relative_threshold, extract_hard_desat_features, \
+from SHHS_Causal.utils_func import linear_interpolation, extract_relative_threshold, extract_hard_desat_features, \
     extract_hard_personalized_desat, extract_all_new_features, compute_psd_features
 
 

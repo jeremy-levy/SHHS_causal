@@ -9,7 +9,6 @@ ahi_events_name_shhs = ['Obstructive Apnea', 'Hypopnea', 'Obstructive Hypopnea',
                         'Mixed Apnea|Mixed Apnea', 'Obstructive Hypopnea|Obstructive Hypopnea']
 
 
-# TODO: Check that number of event correspond to AHI in csv-guidelines
 def extract_events_xml(xml_path):
     """
     Receives as parameter path to specific xml file.

@@ -1,3 +1,7 @@
+import sys
+
+sys.path.append('/home/jeremy.levy/Jeremy/copd_osa')
+
 import os
 
 import numpy as np
@@ -7,33 +11,64 @@ from pobm.prep import set_range, median_spo2
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
-from spo2_processing import extract_biomarkers_per_signal
-from utils_func import linear_interpolation, load_sleep_stages
-from xml_processing import extract_events_xml
+from SHHS_Causal.spo2_processing import extract_biomarkers_per_signal
+from SHHS_Causal.utils_func import linear_interpolation, load_sleep_stages
+from SHHS_Causal.xml_processing import extract_events_xml
 
 
-def read_csv_metadata(database_path):
-    metadata = pd.read_csv(os.path.join(database_path, 'shhs1-harmonized-dataset-0.18.0.csv'))
+def read_csv_metadata(database_path, dataset):
+    if dataset is 'shhs1':
+        metadata = pd.read_csv(os.path.join(database_path, 'shhs1-harmonized-dataset-0.18.0.csv'))
 
-    metadata['smoking_status'] = metadata['nsrr_current_smoker'] + metadata['nsrr_ever_smoker']
+        metadata['smoking_status'] = metadata['nsrr_current_smoker'] + metadata['nsrr_ever_smoker']
 
-    metadata['smoking_status'].replace({'nono': 'No smoker'}, inplace=True)
-    metadata['smoking_status'].replace({'noyes': 'Ex smoker'}, inplace=True)
-    metadata['smoking_status'].replace({'yesno': 'Bug'}, inplace=True)
-    metadata['smoking_status'].replace({'yesyes': 'Smoker'}, inplace=True)
-    metadata['smoking_status'].replace({'not reportednot reported': 'Smoker'}, inplace=True)
+        metadata['smoking_status'].replace({'nono': 'No smoker'}, inplace=True)
+        metadata['smoking_status'].replace({'noyes': 'Ex smoker'}, inplace=True)
+        metadata['smoking_status'].replace({'yesno': 'Bug'}, inplace=True)
+        metadata['smoking_status'].replace({'yesyes': 'Smoker'}, inplace=True)
+        metadata['smoking_status'].replace({'not reportednot reported': 'Smoker'}, inplace=True)
+
+    elif dataset is 'shhs2':
+        metadata = pd.read_csv(os.path.join(database_path, 'shhs2-dataset-0.18.0.csv'), encoding='cp1252')
+
+        metadata['nsrr_age'] = metadata['age_s2']
+
+        metadata['gender'].replace({1.0: 'male'}, inplace=True)
+        metadata['gender'].replace({2.0: 'female'}, inplace=True)
+        metadata['nsrr_sex'] = metadata['gender']
+
+        metadata['race'].replace({1.0: 'white'}, inplace=True)
+        metadata['race'].replace({2.0: 'black or african american'}, inplace=True)
+        metadata['race'].replace({2.0: 'other'}, inplace=True)
+        metadata['nsrr_race'] = metadata['race']
+
+        metadata_shhs1 = pd.read_csv(os.path.join(database_path, 'shhs1-harmonized-dataset-0.18.0.csv'))
+        metadata['nsrr_ethnicity'] = metadata_shhs1['nsrr_ethnicity']
+
+        metadata['nsrr_bmi'] = metadata['bmi_s2']
+
+        metadata['smoking_status'] = metadata['smokstat_s2']
+        metadata['smoking_status'].replace({0.0: 'No smoker'}, inplace=True)
+        metadata['smoking_status'].replace({1.0: 'Smoker'}, inplace=True)
+        metadata['smoking_status'].replace({2.0: 'Ex smoker'}, inplace=True)
+
+        metadata = metadata[
+            ['nsrrid', 'nsrr_age', 'nsrr_sex', 'nsrr_race', 'nsrr_ethnicity', 'nsrr_bmi', 'smoking_status']]
+
+    else:
+        return
 
     return metadata
 
 
 def prepare_csv_one_patient(arg):
-    database_path, metadata, patient, window_length = arg
+    database_path, metadata, patient, window_length, edf_dir = arg
 
     biomarker_patient = pd.DataFrame()
     metadata_patient = metadata.loc[metadata['nsrrid'] == int(patient[6:])]
 
     try:
-        edf = pyedflib.EdfReader(os.path.join(database_path, 'edf', patient + '.edf'))
+        edf = pyedflib.EdfReader(os.path.join(database_path, edf_dir, patient + '.edf'))
         i_position = np.where(np.array(edf.getSignalLabels()) == 'SaO2')[0][0]
         position = edf.readSignal(i_position)
         spo2_signal = np.array(position).astype(float)
@@ -46,8 +81,11 @@ def prepare_csv_one_patient(arg):
     spo2_signal = median_spo2(spo2_signal)
     spo2_signal = linear_interpolation(spo2_signal)
 
-    events_name, events_start, events_duration = extract_events_xml(os.path.join(database_path, 'xml',
-                                                                                 patient + '-nsrr.xml'))
+    try:
+        events_name, events_start, events_duration = extract_events_xml(os.path.join(database_path, 'xml',
+                                                                                     patient + '-nsrr.xml'))
+    except FileNotFoundError:
+        return
 
     length_epoch = 30
     try:
@@ -61,22 +99,24 @@ def prepare_csv_one_patient(arg):
         event_start = int(float(event_start))
         event_duration = int(float(event_duration))
 
-        if event_start - previous_events_end >= 2 * window_length:
-            window_begin = previous_events_end + window_length / 2
+        num_window_to_compute = int((event_start - previous_events_end) / window_length) - 1
+        for curr_ in range(num_window_to_compute):
+            window_begin = previous_events_end + window_length / 2 + curr_ * window_length
             window_end = window_begin + window_length
 
             spo2_window_no_event = spo2_signal[int(float(window_begin)): int(float(window_end))]
             sleep_stage_window = [1]
 
-            biomarkers_window = save_window(spo2_window_no_event, window_length, sleep_stage_window, -1,  -1, patient,
-                                            '', metadata_patient, outcome=0)
+            biomarkers_window = save_window(spo2_window_no_event, window_length, sleep_stage_window, -1, -1, patient,
+                                            '', metadata_patient, outcome=0, window_begin=window_begin)
             biomarker_patient = pd.concat([biomarker_patient, biomarkers_window])
 
-        spo2_window = spo2_signal[int(float(event_start)) - window_length: int(float(event_start))]
+        window_begin = int(float(event_start)) - window_length
+        spo2_window = spo2_signal[window_begin: int(float(event_start))]
         sleep_stage_window = sleep_stages[
                              int(float(event_start)) - 1: int(float(event_start)) + int(float(event_duration)) + 1]
         biomarkers_window = save_window(spo2_window, window_length, sleep_stage_window, event_start, event_duration,
-                                        patient, event_name, metadata_patient, outcome=1)
+                                        patient, event_name, metadata_patient, outcome=1, window_begin=window_begin)
         biomarker_patient = pd.concat([biomarker_patient, biomarkers_window])
 
         previous_events_end = event_start + event_duration
@@ -84,7 +124,7 @@ def prepare_csv_one_patient(arg):
 
 
 def save_window(spo2_window, window_length, sleep_stage_window, event_start, event_duration, patient, event_name,
-                metadata_patient, outcome):
+                metadata_patient, outcome, window_begin):
     # Filtering events with no Spo2 available
     if len(spo2_window) < window_length:
         return pd.DataFrame()
@@ -93,7 +133,7 @@ def save_window(spo2_window, window_length, sleep_stage_window, event_start, eve
     if 0 in sleep_stage_window:
         return pd.DataFrame()
 
-    biomarkers_window = extract_biomarkers_per_signal(spo2_window, patient=patient)
+    biomarkers_window = extract_biomarkers_per_signal(spo2_window, patient=patient, compute_complexity=False)
 
     biomarkers_window['event_name'] = event_name
     biomarkers_window['event_start'] = event_start
@@ -101,40 +141,51 @@ def save_window(spo2_window, window_length, sleep_stage_window, event_start, eve
 
     biomarkers_window['outcome'] = outcome
 
-    biomarkers_window['age'] = metadata_patient['nsrr_age']
-    biomarkers_window['sex'] = metadata_patient['nsrr_sex']
-    biomarkers_window['race'] = metadata_patient['nsrr_race']
-    biomarkers_window['ethnicity'] = metadata_patient['nsrr_ethnicity']
-    biomarkers_window['bmi'] = metadata_patient['nsrr_bmi']
-    biomarkers_window['smoking_status'] = metadata_patient['smoking_status']
+    biomarkers_window['age'] = metadata_patient['nsrr_age'].values[0]
+    biomarkers_window['sex'] = metadata_patient['nsrr_sex'].values[0]
+    biomarkers_window['race'] = metadata_patient['nsrr_race'].values[0]
+    biomarkers_window['ethnicity'] = metadata_patient['nsrr_ethnicity'].values[0]
+    biomarkers_window['bmi'] = metadata_patient['nsrr_bmi'].values[0]
+    biomarkers_window['smoking_status'] = metadata_patient['smoking_status'].values[0]
 
+    biomarkers_window['window_begin'] = window_begin
     return biomarkers_window
 
 
-def union_csv():
+def union_csv(dataset):
     data_df = pd.DataFrame()
-    for csv_file in tqdm(os.listdir('data_csv')):
+    for csv_file in tqdm(os.listdir('data_csv'), desc='union_csv'):
         df_current = pd.read_csv(os.path.join('data_csv', csv_file))
         data_df = pd.concat([data_df, df_current])
 
     print('data_df', data_df.shape)
-    data_df.to_csv('data_SHHS1.csv', index=False)
+    data_df.to_csv('data_' + dataset + '.csv', index=False)
 
 
-def main(database_path):
-    window_length = 300
+def main(database_path, dataset):
+    window_length = 300  # 5 minutes
 
-    metadata = read_csv_metadata(database_path)
+    metadata = read_csv_metadata(database_path, dataset=dataset)
 
-    list_patients = [file_name[0:-4] for file_name in os.listdir(os.path.join(database_path, 'edf'))]
-    args = [(database_path, metadata, patient, window_length) for patient in list_patients]
-    Parallel(n_jobs=-1)(delayed(prepare_csv_one_patient)(arg) for arg in tqdm(args))
+    if dataset is 'shhs1':
+        edf_dir = 'edf'
+    elif dataset is 'shhs2':
+        edf_dir = 'edf_shhs2'
+    else:
+        return
+
+    list_patients = [file_name[0:-4] for file_name in os.listdir(os.path.join(database_path, edf_dir))]
+    args = [(database_path, metadata, patient, window_length, edf_dir) for patient in list_patients]
+    Parallel(n_jobs=90)(delayed(prepare_csv_one_patient)(arg) for arg in tqdm(args))
+
+    # for arg in tqdm(args):
+    #     prepare_csv_one_patient(arg)
 
 
 if __name__ == "__main__":
     os.makedirs('data_csv', exist_ok=True)
 
-    main(database_path='/MLAIM/AIMLab/Jeremy/SHHS1/')
-    # main(database_path='/MLAIM/AIMLab/Jeremy/shhs2/')
+    # main(database_path='/MLAIM/AIMLab/Jeremy/SHHS1/', dataset='shhs1')
+    main(database_path='/MLAIM/AIMLab/Jeremy/shhs2/', dataset='shhs2')
 
-    union_csv()
+    union_csv(dataset='SHHS2')
