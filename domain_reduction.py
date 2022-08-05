@@ -89,6 +89,26 @@ def read_data(database='SHHS1'):
     return spo2_features, other_data
 
 
+def read_combined_data():
+    data_1 = pd.read_csv(os.path.join('/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/',
+                                      'data_SHHS1.csv'))
+    data_2 = pd.read_csv(os.path.join('/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/',
+                                      'data_SHHS2.csv'))
+    data_df = pd.concat([data_1, data_2])
+
+    spo2_features = data_df.drop(columns=x_columns + y_column + t_baseline + event_columns)
+    spo2_features = preprocess_data(spo2_features)
+    other_data = data_df[x_columns + y_column + t_baseline]
+
+    all_data = pd.concat([spo2_features, other_data], axis=1)
+    all_data = all_data.dropna()
+
+    spo2_features = all_data.drop(columns=x_columns + y_column + t_baseline)
+    other_data = all_data[x_columns + y_column + t_baseline]
+
+    return spo2_features, other_data
+
+
 def main(database):
     spo2_features, other_data = read_data(database)
 
@@ -102,8 +122,23 @@ def main(database):
                                    'data_' + database + '_dimensionality_reduction.csv'), index=False)
 
 
+def main_combined():
+    spo2_features, other_data = read_combined_data()
+
+    autoencoder_treatment = autoencoder_reduction(spo2_features)
+    other_data['autoencoder_treatment'] = autoencoder_treatment
+
+    pca_treatment = pca_reduction(spo2_features)
+    other_data['pca_treatment'] = pca_treatment
+
+    other_data.to_csv(os.path.join('/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/',
+                                   'data_dimensionality_reduction.csv'), index=False)
+
+
 if __name__ == "__main__":
     tf.config.set_visible_devices([], 'GPU')
 
-    # main(database='SHHS1')
+    main(database='SHHS1')
     main(database='SHHS2')
+
+    main_combined()
