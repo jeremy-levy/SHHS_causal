@@ -1,9 +1,5 @@
 import sys
 
-from torch.utils.tensorboard import SummaryWriter
-
-from utils.utils_func import save_dict
-
 sys.path.append('/home/jeremy.levy/Jeremy/copd_osa')
 
 import pandas as pd
@@ -21,12 +17,16 @@ import matplotlib.pyplot as plt
 from xgboost import XGBClassifier
 import optuna
 import random
+from torch.utils.tensorboard import SummaryWriter
 
 from SHHS_Causal.causal_dataloader import CausalDataset
 from SHHS_Causal.tabular_model_DL import TabularModel
 from SHHS_Causal.constants import x_columns, y_column, x_columns_continuous, x_columns_categorical, t_baseline
 import utils.graphics as graph
 from sklearn.metrics import classification_report
+from utils.utils_func import save_dict
+from SHHS_Causal.TabNet import TabNet
+from SHHS_Causal.mutual_information import MutualInformation
 
 
 class Main:
@@ -39,9 +39,17 @@ class Main:
             'num_epochs': num_epochs,
             'learning_rate': 0.01,
 
-            'embedding_size_categorical': 16,
-            'embedding_size_continuous': 16,
+            'embedding_size_categorical': 2,
+            'embedding_size_continuous': 6,
+            'combined_embedding': 26,
+            'dropout': 0.1,
 
+            'model': 'TabNet',        # TabularDL / TabNet
+
+            # weight for each loss
+            'representation_weight': 0.01,
+            'regularization_weight': 0.0005,
+            'tabnet_weight': 0.1,
         }
 
         self.writer = SummaryWriter()
@@ -54,9 +62,8 @@ class Main:
             self.device = torch.device('cpu')
         print(f"Using {self.device} device")
 
-        self.representation_loss = self.get_representation_loss()
+        self.representation_loss = MutualInformation()
         self.classification_loss = nn.BCEWithLogitsLoss()
-        self.regularization_weight = 0.0005
 
         self.ticks_fontsize, self.fontsize, self.letter_fontsize = 15, 15, 15
 
@@ -70,14 +77,7 @@ class Main:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    def get_representation_loss(self):
-        def no_loss(representation_x, t):
-            return -1
-        return no_loss
-
     def get_database(self):
-        # TODO: Add preprocessing data
-
         all_data = pd.read_csv(os.path.join('/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/',
                                             'data_dimensionality_reduction.csv'))
 
@@ -89,7 +89,6 @@ class Main:
         x_categorical = all_data[x_columns_categorical].values
         y = all_data[y_column].values
 
-        # x_categorical = OneHotEncoder(sparse=False).fit_transform(x_categorical)
         x_categorical = CatBoostEncoder().fit_transform(x_categorical, y).values
 
         idx_train, idx_val, _, _ = train_test_split(np.arange(t.shape[0]), np.arange(t.shape[0]), train_size=0.8,
@@ -102,10 +101,13 @@ class Main:
         val_dataset = CausalDataset(t[idx_val], x_continuous[idx_val], x_categorical[idx_val], y[idx_val])
         val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=self.params['batch_size'], shuffle=True)
 
+        x_shape_categorical = x_categorical.shape[1]
+        x_shape_continuous = x_continuous.shape[1]
+
         self.params['x_shape_categorical'] = x_categorical.shape[1]
         self.params['x_shape_continuous'] = x_continuous.shape[1]
 
-        return train_dataloader, val_dataloader
+        return train_dataloader, val_dataloader, x_shape_categorical, x_shape_continuous
 
     def plot_gradients(self, model, epoch):
         all_grads = []
@@ -127,7 +129,7 @@ class Main:
         l2_reg = torch.tensor(0., device=self.device)
         for param in model.parameters():
             l2_reg += torch.norm(param)
-        reg_loss = self.regularization_weight * l2_reg
+        reg_loss = self.params['regularization_weight'] * l2_reg
 
         return reg_loss
 
@@ -139,7 +141,7 @@ class Main:
             add_str = 'Val'
             model.eval()
 
-        representation_loss_epoch, classification_loss_epoch, regularization_loss_epoch = [], [], []
+        representation_loss_epoch, classification_loss_epoch, regularization_loss_epoch, tabnet_loss_epoch = [], [], [], []
         for i, data in enumerate(tqdm(data_loader)):
             if train_flag is True:
                 optimizer.zero_grad()
@@ -151,29 +153,37 @@ class Main:
             y = torch.squeeze(y.to(self.device))
             t = t.to(self.device)
 
-            representation_x, predicted_outcome = model(x_continuous, x_categorical, t)
+            representation_x, predicted_outcome, tabnet_loss = model(x_continuous, x_categorical, t)
 
-            # representation_loss = self.representation_loss(representation_x, t)
+            representation_loss = self.representation_loss.getMutualInformation(representation_x, t)
+            representation_loss = representation_loss * self.params['representation_weight']
             classification_loss = self.classification_loss(predicted_outcome, y)
             regularization_loss = self.regularization_loss(model)
+            tabnet_loss = self.params['tabnet_weight'] * tabnet_loss
 
             if train_flag is True:
-                # representation_loss.backward(retain_graph=True)
+                representation_loss.backward(retain_graph=True)
                 classification_loss.backward(retain_graph=True)
                 regularization_loss.backward(retain_graph=True)
+                tabnet_loss.backward(retain_graph=True)
+
                 # self.plot_gradients(model, epoch=epoch)
                 optimizer.step()
 
-            # representation_loss_epoch.append(representation_loss.data.item())
+            representation_loss_epoch.append(representation_loss.data.item())
             classification_loss_epoch.append(classification_loss.data.item())
             regularization_loss_epoch.append(regularization_loss.data.item())
+            tabnet_loss_epoch.append(tabnet_loss.data.item())
 
         representation_loss_epoch = np.mean(representation_loss_epoch)
         classification_loss_epoch = np.mean(classification_loss_epoch)
         regularization_loss_epoch = np.mean(regularization_loss_epoch)
+        tabnet_loss_epoch = np.mean(tabnet_loss_epoch)
 
         self.writer.add_scalar("Classification/" + add_str, classification_loss_epoch, epoch)
         self.writer.add_scalar("Regularization/" + add_str, regularization_loss_epoch, epoch)
+        self.writer.add_scalar("Tabnet/" + add_str, tabnet_loss_epoch, epoch)
+        self.writer.add_scalar("Representation/" + add_str, representation_loss_epoch, epoch)
 
         log = " (" + add_str + ") Representation: {:.4f}  Classification: {:.4f}  | ".format(
             representation_loss_epoch, classification_loss_epoch)
@@ -222,11 +232,14 @@ class Main:
         return best_test_loss, stop_training
 
     def get_model(self):
-        print(self.params)
-        return TabularModel(self.params).to(self.device)
+        if self.params['model'] == 'TabularDL':
+            return TabularModel(self.params).to(self.device)
+        elif self.params['model'] == 'TabNet':
+            input_dim = self.params['x_shape_categorical'] + self.params['x_shape_continuous']
+            return TabNet(input_dim=input_dim, output_dim=1)
 
     def run(self):
-        train_dataloader, val_dataloader = self.get_database()
+        train_dataloader, val_dataloader, _, _ = self.get_database()
 
         model = self.get_model()
         optimizer = torch.optim.Adam(model.parameters(), lr=self.params['learning_rate'])
@@ -248,7 +261,10 @@ class Main:
             x_categorical = x_categorical.to(self.device)
             t = t.to(self.device)
 
-            _, predicted_outcome = model(x_continuous, x_categorical, t)
+            if self.params['model'] == 'TabNet':
+                _, predicted_outcome, _ = model(x_continuous, x_categorical, t)
+            else:
+                _, predicted_outcome = model(x_continuous, x_categorical, t)
 
             y_pred.append(predicted_outcome)
             y_test.append(y)
@@ -294,18 +310,20 @@ class Main:
         print(dict_results)
 
     def optuna_search(self):
-        train_dataloader, val_dataloader = self.get_database()
+        train_dataloader, val_dataloader, x_shape_categorical, x_shape_continuous = self.get_database()
 
         def objective(trial):
             self.params = {
                 'batch_size': 128,
                 'num_epochs': 200,
                 'learning_rate': 0.005,
+                'x_shape_categorical': x_shape_categorical,
+                'x_shape_continuous': x_shape_continuous,
 
                 'embedding_size_categorical': trial.suggest_int('embedding_size_categorical', 2, 32, step=2),
                 'embedding_size_continuous': trial.suggest_int('embedding_size_continuous', 2, 32, step=2),
                 'combined_embedding': trial.suggest_int('combined_embedding', 2, 32, step=2),
-                'dropout': trial.suggest_float('combined_embedding', 0.1, 0.8, step=0.1),
+                'dropout': trial.suggest_float('dropout', 0.1, 0.8, step=0.1),
             }
 
             model = self.get_model()
@@ -313,7 +331,7 @@ class Main:
             best_val_loss = self.train_model(train_dataloader, val_dataloader, optimizer, model)
 
             self.params['val_loss'] = best_val_loss
-            save_dict(self.params, file_name='/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/optuna_results//optuna.csv')
+            save_dict(self.params, file_name='/home/jeremy.levy/Jeremy/copd_osa/SHHS_Causal/optuna_results/optuna.csv')
             return best_val_loss
 
         study = optuna.create_study(direction='minimize')
@@ -331,7 +349,8 @@ class Main:
 
 
 if __name__ == "__main__":
-    main = Main(batch_size=64, num_epochs=200, short_sample=False, device='gpu')
+    main = Main(batch_size=512, num_epochs=200, short_sample=False, device='cpu')
 
     main.run()
     # main.baseline_model()
+    # main.optuna_search()
