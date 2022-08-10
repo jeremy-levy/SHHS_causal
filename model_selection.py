@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import PolynomialFeatures
-from constants import metadata_columns, outcome_column, treatment_column
-
+from constants import y_column, x_columns, t_baseline
 
 from GPS import gps_score
 from dose_average_response import avg_dose_response
@@ -18,6 +17,7 @@ def check_best(best_model, current_model, best_auc, current_auc):
         best_model_auc = current_auc
         best_model = current_model
     return best_model, best_auc
+
 
 def evaluate_model(y_test, y_pred, model):
     model_auc = roc_auc_score(y_test, y_pred)
@@ -114,6 +114,7 @@ def model_selection(X, Y):
 
     return best_model
 
+
 def linear_pred(X, T):
     predictors = np.column_stack([X, T])
     try:
@@ -121,6 +122,7 @@ def linear_pred(X, T):
         return df
     except:
         return predictors
+
 
 def poly_pred(X, T):
 
@@ -138,27 +140,25 @@ def poly_pred(X, T):
         return poly_predictors
 
 
-
-
-ds = pd.read_csv("data_SHHS2_sample.csv")[metadata_columns + outcome_column + treatment_column].dropna()
+ds = pd.read_csv(r"new_data/data_SHHS1_dimensionality_reduction.csv")[x_columns + y_column + t_baseline].dropna()
 print(ds.loc[ds['outcome'] == 1].shape)
 print(ds.loc[ds['outcome'] == 0].shape)
 
-ds_1 = ds.loc[ds['outcome'] == 1].sample(n=2282)
-ds_0 = ds.loc[ds['outcome'] == 0]
+ds_1 = ds.loc[ds['outcome'] == 1].sample(n=4000)
+ds_0 = ds.loc[ds['outcome'] == 0].sample(n=4000)
 ds = pd.concat([ds_1, ds_0]).dropna()
 
-X = ds[metadata_columns]
+X = ds[x_columns]
 X = pd.get_dummies(X)
 
-Y = ds[outcome_column]
-T = ds[treatment_column]
+Y = ds[y_column]
+T = ds[t_baseline]
 
-# "Test with X, T linear features"
-# predictors = linear_pred(X, T)
-# print(predictors)
-# model = model_selection(predictors, Y)
-# avg_dose_response(X, T, Y, model,  linear_pred)
+"Test with X, T linear features"
+predictors = linear_pred(X, T)
+print(predictors)
+model = model_selection(predictors, Y)
+avg_dose_response(X, T, Y, model,  linear_pred)
 
 
 # "Test with X, T intersection and Polynomial features up to 2 degrees"
@@ -167,14 +167,12 @@ T = ds[treatment_column]
 # avg_dose_response(X, T, Y, model, poly_pred)
 
 
-
-
-"Test with GPS score prior gamma"
-
-R_hat = gps_score(X, T, prior="Gamma")
-predictors = poly_pred(R_hat, T)
-model = model_selection(predictors, Y)
-avg_dose_response(R_hat, T, Y, model,  poly_pred)
+# "Test with GPS score prior gamma"
+#
+# R_hat = gps_score(X, T, prior="Gamma")
+# predictors = poly_pred(R_hat, T)
+# model = model_selection(predictors, Y)
+# avg_dose_response(R_hat, T, Y, model,  poly_pred)
 
 
 
