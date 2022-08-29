@@ -12,9 +12,10 @@ from constants import y_column, x_columns, t_baseline
 from GPS import gps_score
 from dose_average_response import avg_dose_response
 
+
 def check_best(best_model, current_model, best_auc, current_auc):
     if current_auc > best_auc:
-        best_model_auc = current_auc
+        best_auc = current_auc
         best_model = current_model
     return best_model, best_auc
 
@@ -36,7 +37,6 @@ def evaluate_model(y_test, y_pred, model):
 
 
 def model_selection(X, Y):
-
     X_train, X_test, y_train, y_test = train_test_split(X, np.ravel(Y), test_size=0.2)
 
     # No Skill model
@@ -45,12 +45,10 @@ def model_selection(X, Y):
     best_model = lambda x: 0
     best_auc = 0.5
 
-
     # est_gp = find_best_features(X_train, y_train, column_names=X.columns)
     # y_pred = est_gp.predict(X_test)
     # model_auc = evaluate_model(y_test, y_pred, 'GeneticESTIMATOR')
     # best_model, best_auc = check_best(best_model, est_gp, best_auc, model_auc)
-
 
     # RandomForestRegressor
     regressor = RandomForestRegressor(random_state=0)
@@ -68,7 +66,6 @@ def model_selection(X, Y):
     y_pred = random_model.predict(X_test)
     model_auc = evaluate_model(y_test, y_pred, 'RandomForestRegressor')
     best_model, best_auc = check_best(best_model, random_model, best_auc, model_auc)
-
 
     xgb_r = xg.XGBRegressor(objective='reg:squarederror', seed=123)
     grid_search = {"n_estimators": np.linspace(10, 150, 10, dtype=int),
@@ -89,8 +86,6 @@ def model_selection(X, Y):
     model_auc = evaluate_model(y_test, y_pred, 'XGBRegressor')
     best_model, best_auc = check_best(best_model, random_model, best_auc, model_auc)
 
-
-
     # LinearRegression
     LinearReg = LinearRegression()
     LinearReg.fit(X_train, y_train)
@@ -98,14 +93,12 @@ def model_selection(X, Y):
     model_auc = evaluate_model(y_test, y_pred, 'LinearRegression')
     best_model, best_auc = check_best(best_model, random_model, best_auc, model_auc)
 
-
     # Logistic Regression
     LogisticRegressionModel = LogisticRegression(solver='lbfgs', max_iter=2000)
     LogisticRegressionModel.fit(X_train, y_train)
     y_pred = LogisticRegressionModel.predict_proba(X_test)[:, 1]
     model_auc = evaluate_model(y_test, y_pred, 'LogisticRegression')
     best_model, best_auc = check_best(best_model, random_model, best_auc, model_auc)
-
 
     # show the legend
     plt.legend()
@@ -125,7 +118,6 @@ def linear_pred(X, T):
 
 
 def poly_pred(X, T):
-
     predictors = np.column_stack([X, T])
 
     try:
@@ -140,39 +132,36 @@ def poly_pred(X, T):
         return poly_predictors
 
 
-ds = pd.read_csv(r"new_data/data_SHHS1_dimensionality_reduction.csv")[x_columns + y_column + t_baseline].dropna()
-print(ds.loc[ds['outcome'] == 1].shape)
-print(ds.loc[ds['outcome'] == 0].shape)
+if __name__ == "__main__":
+    ds = pd.read_csv(r"new_data/data_SHHS1_dimensionality_reduction.csv")[x_columns + y_column + t_baseline].dropna()
+    print(ds.loc[ds['outcome'] == 1].shape)
+    print(ds.loc[ds['outcome'] == 0].shape)
 
-ds_1 = ds.loc[ds['outcome'] == 1].sample(n=4000)
-ds_0 = ds.loc[ds['outcome'] == 0].sample(n=4000)
-ds = pd.concat([ds_1, ds_0]).dropna()
+    ds_1 = ds.loc[ds['outcome'] == 1].sample(n=4000)
+    ds_0 = ds.loc[ds['outcome'] == 0].sample(n=4000)
+    ds = pd.concat([ds_1, ds_0]).dropna()
 
-X = ds[x_columns]
-X = pd.get_dummies(X)
+    X = ds[x_columns]
+    X = pd.get_dummies(X)
 
-Y = ds[y_column]
-T = ds[t_baseline]
+    Y = ds[y_column]
+    T = ds[t_baseline]
 
-"Test with X, T linear features"
-predictors = linear_pred(X, T)
-print(predictors)
-model = model_selection(predictors, Y)
-avg_dose_response(X, T, Y, model,  linear_pred)
+    "Test with X, T linear features"
+    predictors = linear_pred(X, T)
+    print(predictors)
+    model = model_selection(predictors, Y)
+    avg_dose_response(X, T, Y, model, linear_pred)
 
-
-# "Test with X, T intersection and Polynomial features up to 2 degrees"
-# predictors = poly_pred(X, T)
-# model = model_selection(predictors, Y)
-# avg_dose_response(X, T, Y, model, poly_pred)
-
-
-# "Test with GPS score prior gamma"
-#
-# R_hat = gps_score(X, T, prior="Gamma")
-# predictors = poly_pred(R_hat, T)
-# model = model_selection(predictors, Y)
-# avg_dose_response(R_hat, T, Y, model,  poly_pred)
+    # "Test with X, T intersection and Polynomial features up to 2 degrees"
+    # predictors = poly_pred(X, T)
+    # model = model_selection(predictors, Y)
+    # avg_dose_response(X, T, Y, model, poly_pred)
 
 
-
+    # "Test with GPS score prior gamma"
+    #
+    # R_hat = gps_score(X, T, prior="Gamma")
+    # predictors = poly_pred(R_hat, T)
+    # model = model_selection(predictors, Y)
+    # avg_dose_response(R_hat, T, Y, model,  poly_pred)

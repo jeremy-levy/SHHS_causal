@@ -85,7 +85,12 @@ class SparsemaxFunction(Function):
         support = rhos * input_srt > input_cumsum
 
         support_size = support.sum(dim=dim).unsqueeze(dim)
-        tau = input_cumsum.gather(dim, support_size - 1)
+        try:
+            tau = input_cumsum.gather(dim, support_size - 1)
+        except RuntimeError:
+            print('RuntimeError tau.gather(dim, support_size)')
+            tau = input_cumsum.gather(dim, support_size)
+
         tau /= support_size.to(input.dtype)
         return tau, support_size
 
@@ -150,7 +155,13 @@ class Entmax15Function(Function):
         tau = mean - torch.sqrt(delta_nz)
 
         support_size = (tau <= Xsrt).sum(dim).unsqueeze(dim)
-        tau_star = tau.gather(dim, support_size - 1)
+
+        try:
+            tau_star = tau.gather(dim, support_size - 1)
+        except RuntimeError:
+            print('RuntimeError tau.gather(dim, support_size)')
+            tau_star = tau.gather(dim, support_size)
+
         return tau_star, support_size
 
 

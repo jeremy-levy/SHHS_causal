@@ -42,7 +42,7 @@ class MutualInformation(nn.Module):
         H_x2 = -pdf_x2 * torch.log2(pdf_x2 + self.epsilon)
         H_x1x2 = -torch.sum(pdf_x1x2 * torch.log2(pdf_x1x2 + self.epsilon), dim=1)
 
-        mutual_information = H_x1x2 - H_x1 - H_x2
+        mutual_information = - (H_x1x2 - H_x1 - H_x2)
 
         if self.normalize:
             mutual_information = 2 * mutual_information / (H_x1 + H_x2)

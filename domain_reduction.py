@@ -14,15 +14,18 @@ from sklearn.preprocessing import StandardScaler
 from keras import backend as K
 import numpy as np
 from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, TensorBoard
+from sklearn.preprocessing import MinMaxScaler
 
 from SHHS_Causal.preprocess_features import preprocess_data
 from constants import x_columns, y_column, event_columns, t_baseline
 
 
 def pca_reduction(spo2_features):
+    preprocessed_features = MinMaxScaler().fit_transform(spo2_features)
+
     pca = PCA(n_components=1)
-    pca.fit(spo2_features)
-    single_treatment = pca.transform(spo2_features)
+    pca.fit(preprocessed_features)
+    single_treatment = pca.transform(preprocessed_features)
 
     return single_treatment
 
@@ -138,7 +141,7 @@ def main_combined():
 if __name__ == "__main__":
     tf.config.set_visible_devices([], 'GPU')
 
-    main(database='SHHS1')
-    main(database='SHHS2')
+    # main(database='SHHS1')
+    # main(database='SHHS2')
 
     main_combined()

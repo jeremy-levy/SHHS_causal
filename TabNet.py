@@ -11,19 +11,11 @@ class TabNet(nn.Module):
             self,
             input_dim,
             output_dim,
-            n_d=8,
-            n_a=8,
-            n_steps=3,
-            gamma=1.3,
+            params,
             cat_idxs=None,
             cat_dims=None,
-            cat_emb_dim=1,
-            n_independent=2,
-            n_shared=2,
-            epsilon=1e-15,
             virtual_batch_size=128,
-            momentum=0.02,
-            mask_type="sparsemax",
+            epsilon=1e-15,
     ):
         """
         Defines TabNet network
@@ -70,18 +62,19 @@ class TabNet(nn.Module):
             cat_idxs = []
         self.cat_idxs = cat_idxs or []
         self.cat_dims = cat_dims or []
-        self.cat_emb_dim = cat_emb_dim
+        self.cat_emb_dim = params['cat_emb_dim']
 
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.n_d = n_d
-        self.n_a = n_a
-        self.n_steps = n_steps
-        self.gamma = gamma
+        self.n_d = params['n_d']
+        self.n_a = params['n_a']
+        self.n_steps = params['n_steps']
+        self.gamma = params['gamma']
         self.epsilon = epsilon
-        self.n_independent = n_independent
-        self.n_shared = n_shared
-        self.mask_type = mask_type
+        self.n_independent = params['n_independent']
+        self.n_shared = params['n_shared']
+        self.mask_type = params['mask_type']
+        self.momentum = params['momentum']
 
         if self.n_steps <= 0:
             raise ValueError("n_steps should be a positive integer.")
@@ -91,7 +84,7 @@ class TabNet(nn.Module):
         self.virtual_batch_size = virtual_batch_size
 
         representation_layers = [
-            EmbeddingGenerator(input_dim, cat_dims, cat_idxs, cat_emb_dim),
+            EmbeddingGenerator(input_dim, cat_dims, cat_idxs, params['cat_emb_dim']),
             nn.BatchNorm1d(input_dim),
             nn.Linear(input_dim, input_dim),
             nn.LeakyReLU(),
@@ -103,16 +96,16 @@ class TabNet(nn.Module):
         self.tabnet = TabNetNoEmbeddings(
             self.post_embed_dim + 1,
             output_dim,
-            n_d,
-            n_a,
-            n_steps,
-            gamma,
-            n_independent,
-            n_shared,
+            params['n_d'],
+            params['n_a'],
+            params['n_steps'],
+            params['gamma'],
+            params['n_independent'],
+            params['n_shared'],
             epsilon,
             virtual_batch_size,
-            momentum,
-            mask_type,
+            params['momentum'],
+            params['mask_type'],
         )
 
     def forward(self, x_continuous, x_categorical, t):
